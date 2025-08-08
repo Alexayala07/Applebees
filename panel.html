@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel del Cliente</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="manzanas.png">
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <!-- 🔝 Barra superior -->
+  <header class="top-bar">
+    <div class="left-section">
+      <h1 class="applebees-title">Applebee’s</h1>
+    </div>
+    <div class="center-section">
+      <p id="userGreeting">Bienvenido <span id="clientName"></span></p>
+    </div>
+    <div class="right-section">
+      <button class="logout-highlight" onclick="logout()">Salir</button>
+    </div>
+  </header>
+
+  <!-- 🔽 Contenido principal -->
+  <!-- 🔽 Contenido principal -->
+<main>
+
+  <!-- 🛒 Nueva sección: sólo un botón que lleva al registro -->
+  <section class="panel-option" id="registro-compra" style="text-align: center;">
+  <h2>🛒 Registro de compra</h2>
+  <p>Registra tu ticket para acumular puntos y recompensas.</p>
+  <a class="btn-registrar" href="registrar.html">Registrar compra</a>
+</section>
+
+
+  <section class="panel-option" id="consumos">
+    <h2>📊 Historial de consumos</h2>
+    <div class="content-area" id="historial-consumos"></div>
+  </section>
+
+  <section class="panel-option" id="tickets">
+    <h2>🎟️ Tickets cargados</h2>
+    <div class="content-area" id="tickets-cargados"></div>
+  </section>
+
+  <section class="panel-option" id="visitas">
+    <h2>📍 Visitas realizadas</h2>
+    <div class="content-area" id="visitas-realizadas"></div>
+  </section>
+
+  <section class="panel-option" id="puntos">
+    <h2>⭐ Puntos acumulados</h2>
+    <div class="content-area" id="puntos-acumulados"></div>
+  </section>
+
+  
+</main>
+
+
+  <!-- 👤 Modal de edición de perfil -->
+  <div id="profileModal" class="modal">
+    <div class="modal-content">
+      <h2>Editar Perfil</h2>
+      <input type="text" id="editName" placeholder="Nuevo nombre" />
+      <input type="email" id="editEmail" placeholder="Nuevo correo" />
+      <input type="tel" id="editPhone" placeholder="Nuevo teléfono (opcional)" />
+      <button onclick="saveProfileChanges()">Guardar cambios</button>
+      <button onclick="closeProfileModal()" class="secondary">Cancelar</button>
+    </div>
+  </div>
+
+  <footer>
+    <p>© 2025 Great American Hospitality</p>
+  </footer>
+
+  <!-- 🔗 Firebase + lógica -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="panel.js"></script>
+
+  <!-- 🧠 Lógica de productos y ticket -->
+  <script>
+    const productosSeleccionados = [];
+
+    function agregarProducto() {
+      const nombre = document.getElementById('nuevoProducto').value.trim();
+      const cantidad = parseInt(document.getElementById('nuevaCantidad').value);
+
+      if (!nombre || !cantidad || cantidad <= 0) {
+        alert("🛑 Ingresa nombre y cantidad válida.");
+        return;
+      }
+
+      productosSeleccionados.push({ nombre, cantidad });
+      actualizarListaProductos();
+
+      document.getElementById('nuevoProducto').value = "";
+      document.getElementById('nuevaCantidad').value = "";
+    }
+
+    function actualizarListaProductos() {
+      const lista = document.getElementById('listaProductos');
+      lista.innerHTML = "";
+      productosSeleccionados.forEach(prod => {
+        const item = document.createElement('p');
+        item.textContent = `• ${prod.nombre} (x${prod.cantidad})`;
+        lista.appendChild(item);
+      });
+    }
+
+    function registrarTicketManual() {
+      const numero = document.getElementById('inputTicketNumero').value.trim();
+      const fecha = document.getElementById('inputTicketFecha').value;
+      const total = document.getElementById('inputTicketTotal').value;
+      const validacion = document.getElementById('ticketValidacion');
+      const foto = document.getElementById('ticketFile').files[0] || null;
+      const productos = productosSeleccionados;
+
+      if (!numero || !fecha || !total || productos.length === 0) {
+        validacion.textContent = "⚠️ Completa todos los campos y al menos un producto.";
+        validacion.style.color = "red";
+        return;
+      }
+
+      validacion.textContent = "✅ Ticket registrado correctamente.";
+      validacion.style.color = "green";
+
+      console.log({
+        numero,
+        fecha,
+        productos,
+        total,
+        foto
+      });
+
+      // Aquí podrías enviar a Firebase, guardar local o mostrar resumen visual
+    }
+  </script>
+</body>
+</html>
