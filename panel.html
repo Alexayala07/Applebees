@@ -1,141 +1,161 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel del Cliente</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Panel</title>
   <link rel="icon" type="image/png" sizes="32x32" href="manzanas.png">
-  <link rel="stylesheet" href="panel.css" />
+  <link rel="stylesheet" href="registrar.css" />
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <style>
+    .dashboard { max-width: 980px; margin: 110px auto 60px; padding: 16px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 12px; margin-bottom: 18px; }
+    .stat { background: rgba(25,25,25,.7); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px; }
+    .stat h4 { margin-bottom: 6px; color:#ffd4d4; }
+    table { width:100%; border-collapse: collapse; font-size:14px; background: rgba(25,25,25,.6); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow: hidden; }
+    th, td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); }
+    th { text-align:left; color:#ffd4d4; }
+    .chip-exp { padding:4px 8px; border-radius:999px; font-weight:700; }
+    .ok { color:#9be49b; }
+    .warn { color:#ffdfaa; }
+    .err { color:#ff9a9a; }
+  </style>
 </head>
-<body>
-  <!-- 🔝 Barra superior -->
+<body class="bg-animated">
   <header class="top-bar">
-    <div class="left-section">
-      <h1 class="applebees-title">Applebee’s</h1>
-    </div>
-    <div class="center-section">
-      <p id="userGreeting">Bienvenido <span id="clientName"></span></p>
-    </div>
+    <div class="left-section"><h1 class="applebees-title">Applebee’s</h1></div>
+    <div class="center-section"><p id="userGreeting">Panel</p></div>
     <div class="right-section">
-      <button class="logout-highlight" onclick="logout()">Salir</button>
+      <a class="btn-secondary" href="registrar.html">+ Registrar ticket</a>
     </div>
   </header>
 
-  <!-- 🔽 Contenido principal -->
-  <!-- 🔽 Contenido principal -->
-<main>
+  <main class="dashboard">
+    <section class="stats">
+      <div class="stat">
+        <h4>🎟️ Tickets cargados</h4>
+        <div><strong id="statTickets">0</strong></div>
+      </div>
+      <div class="stat">
+        <h4>📍 Visitas realizadas</h4>
+        <div><strong id="statVisitas">0</strong></div>
+      </div>
+      <div class="stat">
+        <h4>⭐ Puntos activos</h4>
+        <div><strong id="statPuntosActivos">0</strong> pts</div>
+        <small class="warn" id="statPuntosProx"> </small>
+      </div>
+      <div class="stat">
+        <h4>⏳ Puntos vencidos</h4>
+        <div><strong id="statPuntosVencidos">0</strong> pts</div>
+      </div>
+    </section>
 
-  <!-- 🛒 Nueva sección: sólo un botón que lleva al registro -->
-  <section class="panel-option" id="registro-compra" style="text-align: center;">
-  <h2>🛒 Registro de compra</h2>
-  <p>Registra tu ticket para acumular puntos y recompensas.</p>
-  <a class="btn-registrar" href="registrar.html">Registrar compra</a>
-</section>
+    <h3 style="margin:10px 0 8px;">Historial de consumos</h3>
+    <table id="tablaTickets">
+      <thead>
+        <tr>
+          <th># Ticket</th>
+          <th>Fecha</th>
+          <th>Total</th>
+          <th>Puntos</th>
+          <th>Vence</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </main>
 
-
-  <section class="panel-option" id="consumos">
-    <h2>📊 Historial de consumos</h2>
-    <div class="content-area" id="historial-consumos"></div>
-  </section>
-
-  <section class="panel-option" id="tickets">
-    <h2>🎟️ Tickets cargados</h2>
-    <div class="content-area" id="tickets-cargados"></div>
-  </section>
-
-  <section class="panel-option" id="visitas">
-    <h2>📍 Visitas realizadas</h2>
-    <div class="content-area" id="visitas-realizadas"></div>
-  </section>
-
-  <section class="panel-option" id="puntos">
-    <h2>⭐ Puntos acumulados</h2>
-    <div class="content-area" id="puntos-acumulados"></div>
-  </section>
-
-  
-</main>
-
-
-  <!-- 👤 Modal de edición de perfil -->
-  <div id="profileModal" class="modal">
-    <div class="modal-content">
-      <h2>Editar Perfil</h2>
-      <input type="text" id="editName" placeholder="Nuevo nombre" />
-      <input type="email" id="editEmail" placeholder="Nuevo correo" />
-      <input type="tel" id="editPhone" placeholder="Nuevo teléfono (opcional)" />
-      <button onclick="saveProfileChanges()">Guardar cambios</button>
-      <button onclick="closeProfileModal()" class="secondary">Cancelar</button>
-    </div>
-  </div>
-
-  <footer>
-    <p>© 2025 Great American Hospitality</p>
-  </footer>
-
-  <!-- 🔗 Firebase + lógica -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="firebase-config.js"></script>
-  <script src="panel.js"></script>
-
-  <!-- 🧠 Lógica de productos y ticket -->
   <script>
-    const productosSeleccionados = [];
+    const db = firebase.firestore();
+    db.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
 
-    function agregarProducto() {
-      const nombre = document.getElementById('nuevoProducto').value.trim();
-      const cantidad = parseInt(document.getElementById('nuevaCantidad').value);
+    function fmtDate(ts) {
+      if (!ts) return '';
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      return d.toLocaleDateString('es-MX', { year:'numeric', month:'2-digit', day:'2-digit' });
+    }
+    function daysLeft(ts) {
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      const ms = d - new Date();
+      return Math.ceil(ms / (1000*60*60*24));
+    }
 
-      if (!nombre || !cantidad || cantidad <= 0) {
-        alert("🛑 Ingresa nombre y cantidad válida.");
+    firebase.auth().onAuthStateChanged(async (user) => {
+      if (!user) {
+        document.getElementById('userGreeting').textContent = "Inicia sesión";
         return;
       }
+      document.getElementById('userGreeting').textContent = `Hola, ${user.displayName||user.email}`;
 
-      productosSeleccionados.push({ nombre, cantidad });
-      actualizarListaProductos();
+      // Trae tickets más recientes
+      const snap = await db.collection('users').doc(user.uid)
+        .collection('tickets')
+        .orderBy('fecha','desc')
+        .limit(100)
+        .get();
 
-      document.getElementById('nuevoProducto').value = "";
-      document.getElementById('nuevaCantidad').value = "";
-    }
+      const rows = [];
+      let totalTickets = 0;
+      let visitas = 0;
+      let ptsActivos = 0;
+      let ptsVencidos = 0;
 
-    function actualizarListaProductos() {
-      const lista = document.getElementById('listaProductos');
-      lista.innerHTML = "";
-      productosSeleccionados.forEach(prod => {
-        const item = document.createElement('p');
-        item.textContent = `• ${prod.nombre} (x${prod.cantidad})`;
-        lista.appendChild(item);
+      let proximos = []; // para mostrar "puntos que vencen pronto"
+
+      snap.forEach(doc => {
+        const t = doc.data();
+        totalTickets++;
+        visitas++;
+
+        const pts = (t.puntos && t.puntos.total) || 0;
+        const vence = t.vencePuntos;
+        const left = vence ? daysLeft(vence) : 0;
+
+        let estatus = '';
+        if (!vence || left < 0) {
+          ptsVencidos += pts;
+          estatus = '<span class="chip-exp err">Vencido</span>';
+        } else {
+          ptsActivos += pts;
+          estatus = '<span class="chip-exp ok">Activo</span>';
+          if (left <= 14 && pts > 0) {
+            proximos.push({ pts, left, ticket: t.numero });
+          }
+        }
+
+        rows.push(`
+          <tr>
+            <td>${t.numero||''}</td>
+            <td>${fmtDate(t.fecha)}</td>
+            <td>$${Number(t.total||0).toFixed(2)}</td>
+            <td>${pts}</td>
+            <td>${fmtDate(vence)}</td>
+            <td>${estatus}</td>
+          </tr>
+        `);
       });
-    }
 
-    function registrarTicketManual() {
-      const numero = document.getElementById('inputTicketNumero').value.trim();
-      const fecha = document.getElementById('inputTicketFecha').value;
-      const total = document.getElementById('inputTicketTotal').value;
-      const validacion = document.getElementById('ticketValidacion');
-      const foto = document.getElementById('ticketFile').files[0] || null;
-      const productos = productosSeleccionados;
+      document.getElementById('statTickets').textContent = String(totalTickets);
+      document.getElementById('statVisitas').textContent = String(visitas);
+      document.getElementById('statPuntosActivos').textContent = String(ptsActivos);
+      document.getElementById('statPuntosVencidos').textContent = String(ptsVencidos);
+      document.querySelector('#tablaTickets tbody').innerHTML = rows.join('');
 
-      if (!numero || !fecha || !total || productos.length === 0) {
-        validacion.textContent = "⚠️ Completa todos los campos y al menos un producto.";
-        validacion.style.color = "red";
-        return;
+      // Mensaje de próximos a vencer
+      if (proximos.length) {
+        // suma de pts en próximos 14 días
+        const suma = proximos.reduce((a,b)=>a+b.pts,0);
+        const minLeft = Math.min(...proximos.map(p=>p.left));
+        document.getElementById('statPuntosProx').textContent =
+          `⚠️ ${suma} pts vencen en ~${minLeft} día(s).`;
       }
-
-      validacion.textContent = "✅ Ticket registrado correctamente.";
-      validacion.style.color = "green";
-
-      console.log({
-        numero,
-        fecha,
-        productos,
-        total,
-        foto
-      });
-
-      // Aquí podrías enviar a Firebase, guardar local o mostrar resumen visual
-    }
+    });
   </script>
 </body>
 </html>
