@@ -1,55 +1,60 @@
-// registrar.js — Cámara adaptada desde tu script + OCR rápido + puntos automáticos
+// registrar.js — Cámara móvil + (OpenCV opcional) + OCR + Puntos automáticos + Firestore
+
 (() => {
   const el = (id) => document.getElementById(id);
 
-  // === Elementos base (coinciden con tu HTML) ===
-  const fileInput = el('ticketFile');
-  const dropzone  = el('dropzone');
-  const btnCam    = el('btnAbrirCamara');
+  // ===================== Firestore =====================
+  const db = firebase.firestore();
+  // Cache offline (opcional)
+  db.enablePersistence({ synchronizeTabs: true }).catch(() => { /* ignorar errores de persistencia */ });
 
-  const modal     = el('cameraModal');
-  const btnClose  = el('btnCerrarCamara');
-  const video     = el('cameraVideo');
-  const canvas    = el('cameraCanvas');
-  const btnShot   = el('btnCapturar');
+  // ===================== Elementos UI =====================
+  const fileInput    = el('ticketFile');
+  const dropzone     = el('dropzone');
+  const btnCam       = el('btnAbrirCamara');
 
-  const btnOCR      = el('btnProcesarTicket');
-  const btnEditar   = el('btnEditarManual'); // si lo usas
-  const ocrStatus   = el('ocrStatus');
+  const modal        = el('cameraModal');
+  const btnClose     = el('btnCerrarCamara');
+  const video        = el('cameraVideo');
+  const canvas       = el('cameraCanvas');
+  const btnShot      = el('btnCapturar');
 
-  const iNum   = el('inputTicketNumero');
-  const iFecha = el('inputTicketFecha');
-  const iTotal = el('inputTicketTotal');
+  const btnOCR       = el('btnProcesarTicket');
+  const btnEditar    = el('btnEditarManual');
+  const ocrStatus    = el('ocrStatus');
 
-  const listaProd = el('listaProductos');
-  const nuevoProd = el('nuevoProducto');
-  const nuevaCant = el('nuevaCantidad');
-  const btnAdd    = el('btnAgregarProducto');
+  const iNum         = el('inputTicketNumero');
+  const iFecha       = el('inputTicketFecha');
+  const iTotal       = el('inputTicketTotal');
 
-  const buscarProd= el('buscarProducto');
-  const gridProd  = el('productosGrid');
+  const listaProd    = el('listaProductos');
+  const nuevoProd    = el('nuevoProducto');
+  const nuevaCant    = el('nuevaCantidad');
+  const btnAdd       = el('btnAgregarProducto');
+
+  const buscarProd   = el('buscarProducto');
+  const gridProd     = el('productosGrid');
 
   const btnRegistrar = el('btnRegistrarTicket');
   const msgTicket    = el('ticketValidacion');
 
-  // ====== PUNTOS (tabla automática) ======
+  // Puntos (tabla)
   const tablaPuntosBody = (el('tablaPuntos')||{}).querySelector?.('tbody');
   const totalPuntosEl   = el('totalPuntos');
 
-  // === Estado ===
-  let liveStream = null;         // <- como en tu script
+  // ===================== Estado =====================
+  let liveStream = null;
   let currentPreviewURL = null;
   let productos = []; // [{ name, qty }]
   let ocrWorker = null;
 
-  // Catálogo visible para agregar rápido
+  // ===================== Catálogo / Puntos =====================
   const CATALOGO = [
     "Hamburguesa Clásica","Hamburguesa Doble","Combo Hamburguesa",
     "Alitas","Boneless","Papas a la Francesa","Aros de Cebolla",
     "Refresco","Malteada","Limonada","Ensalada","Postre","Cerveza"
   ];
 
-  // ====== Mapa de puntos AUTOMÁTICO (ajústalo aquí) ======
   const PUNTOS_MAP = Object.freeze({
     "Hamburguesa Clásica": 5,
     "Hamburguesa Doble": 7,
@@ -67,7 +72,7 @@
   });
   const getPuntosUnit = (name) => Number(PUNTOS_MAP[name] || 0);
 
-  // ===== Utilidades UI =====
+  // ===================== Utilidades UI =====================
   function setStatus(msg, type = '') {
     ocrStatus.className = 'validacion-msg';
     if (type) ocrStatus.classList.add(type);
@@ -105,7 +110,7 @@
     setPreview(file);
   }
 
-  // ===== Productos (chips + catálogo) =====
+  // ===================== Productos =====================
   function upsertProducto(nombre, cantidad = 1) {
     nombre = String(nombre||'').trim();
     if (!nombre) return;
@@ -143,7 +148,7 @@
     });
   }
 
-  // ====== Resumen de puntos (automático) ======
+  // ===================== Puntos (resumen) =====================
   function updatePuntosResumen(){
     if (!tablaPuntosBody) return;
     tablaPuntosBody.innerHTML = '';
@@ -166,9 +171,9 @@
 
     if (totalPuntosEl) totalPuntosEl.textContent = String(total);
   }
-  function getPuntosDetalle(){
+  function getPuntosDetalle(productosArr) {
     let total = 0;
-    const detalle = productos.map(p => {
+    const detalle = productosArr.map(p => {
       const pts = getPuntosUnit(p.name);
       const sub = pts * p.qty;
       total += sub;
@@ -177,41 +182,34 @@
     return { total, detalle };
   }
 
-  // ===================================================================================
-  // ============  CÁMARA — Adaptada desde tu script (startLiveCamera/takePhoto)  ======
-  // ===================================================================================
-
+  // ===================== Cámara (móvil/desktop) =====================
   async function openCamera() {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         setStatus("Tu navegador no soporta cámara. Usa Adjuntar foto.", "err");
         return;
       }
-      // Igual que tu startLiveCamera, con constraints recomendados
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
           width:  { ideal: 1920 },
-          height: { ideal: 1080 }
+        height: { ideal: 1080 }
         },
         audio: false
       });
       liveStream = stream;
       video.srcObject = stream;
-      // Mostrar modal (mantengo tu accesibilidad con aria-hidden)
       if (modal) {
         modal.setAttribute('aria-hidden','false');
-        modal.style.display = 'flex'; // por si usas style en vez de aria
+        modal.style.display = 'flex';
       }
       setStatus("");
     } catch (error) {
       console.error("Error accediendo a la cámara:", error);
-      setStatus("No se pudo acceder a la cámara. Revisa permisos (candado del navegador).", "err");
-      // Fallback: abre selector de archivo
-      fileInput?.click();
+      setStatus("No se pudo acceder a la cámara. Revisa permisos (candado) o usa Adjuntar foto.", "err");
+      fileInput?.click(); // fallback
     }
   }
-
   function stopCamera() {
     if (liveStream) {
       liveStream.getTracks().forEach(track => track.stop());
@@ -223,9 +221,7 @@
     }
   }
 
-  // === Versión adaptada de takePhoto() ===
   async function captureFrame() {
-    // Asegura dimensiones reales del stream (como en tu takePhoto)
     const w = video.videoWidth;
     const h = video.videoHeight;
     if (!w || !h) return;
@@ -236,10 +232,8 @@
     const ctx = tempCanvas.getContext("2d");
     ctx.drawImage(video, 0, 0, w, h);
 
-    // Cierra la cámara (como closeLiveCamera)
     stopCamera();
 
-    // Si OpenCV.js está disponible, intentamos enderezar el ticket (similar a processImageWithOpenCV)
     let finalDataURL;
     if (window.cv && window.cv.Mat) {
       try {
@@ -254,15 +248,12 @@
 
     const blob = dataURLtoBlob(finalDataURL);
     setFileInputFromBlob(blob, `ticket_${Date.now()}.jpg`);
-
-    // Habilita formulario y da feedback
     enableForm(true);
     setStatus("Foto capturada. Puedes editar o correr OCR.", "ok");
   }
 
-  // === Adaptación de processImageWithOpenCV (sin docName; calidad 0.95) ===
+  // Enderezado opcional usando OpenCV (si está cargado)
   function processImageWithOpenCV(canvasElement) {
-    // NOTA: No usamos compresión primero; enderezamos y luego a JPEG
     const cv = window.cv;
     let src = cv.imread(canvasElement);
     let dst = new cv.Mat();
@@ -285,7 +276,7 @@
       for (let i = 0; i < contours.size(); ++i) {
         const contour = contours.get(i);
         const area = cv.contourArea(contour);
-        if (area < 15000) continue; // un poco más alto para tickets completos
+        if (area < 15000) continue;
 
         const perimeter = cv.arcLength(contour, true);
         const approx = new cv.Mat();
@@ -303,13 +294,11 @@
       let outCanvas = document.createElement('canvas');
 
       if (bestContour) {
-        // Ordena 4 puntos
         const pts = [];
         for (let i = 0; i < bestContour.rows; ++i) {
           pts.push({ x: bestContour.data32S[i*2], y: bestContour.data32S[i*2+1] });
         }
-        const ordered = orderQuad(pts);
-        const [tl, tr, br, bl] = ordered;
+        const [tl, tr, br, bl] = orderQuad(pts);
 
         const widthA  = Math.hypot(br.x - bl.x, br.y - bl.y);
         const widthB  = Math.hypot(tr.x - tl.x, tr.y - tl.y);
@@ -329,10 +318,10 @@
 
         srcCoords.delete(); dstCoords.delete(); M.delete(); bestContour.delete();
 
-        // Pasamos a canvas final; mejor en escala de grises + ligero contraste para OCR
         const showCanvas = document.createElement('canvas');
         cv.imshow(showCanvas, dst);
 
+        // pequeño ajuste para OCR
         const ctx = showCanvas.getContext('2d');
         ctx.filter = 'contrast(1.18) brightness(1.06) grayscale(1)';
         const tmp = document.createElement('canvas');
@@ -341,12 +330,10 @@
         ctx.drawImage(tmp, 0, 0);
 
         outCanvas = showCanvas;
+        finalDataURL = outCanvas.toDataURL("image/jpeg", 0.95);
       } else {
-        // Sin detección clara, usamos la imagen original
-        outCanvas = canvasElement;
+        finalDataURL = canvasElement.toDataURL("image/jpeg", 0.92);
       }
-
-      finalDataURL = outCanvas.toDataURL("image/jpeg", 0.95);
     } finally {
       src.delete(); dst.delete(); gray.delete(); blurred.delete();
       canny.delete(); contours.delete(); hierarchy.delete();
@@ -365,10 +352,7 @@
     }
   }
 
-  // ===================================================================================
-  // ===================================  OCR  ========================================
-  // ===================================================================================
-
+  // ===================== OCR =====================
   async function ensureWorker() {
     if (ocrWorker) return ocrWorker;
     const { createWorker } = Tesseract;
@@ -383,7 +367,7 @@
     await ocrWorker.loadLanguage('spa+eng');
     await ocrWorker.initialize('spa+eng');
     await ocrWorker.setParameters({
-      tessedit_pageseg_mode: '6',           // bloque uniforme
+      tessedit_pageseg_mode: '6', // bloque uniforme
       preserve_interword_spaces: '1',
       user_defined_dpi: '300'
     });
@@ -471,31 +455,65 @@
     }
   }
 
-  // ===== Registro final =====
+  // ===================== Guardar en Firestore (con vencimiento 6 meses) =====================
+  function addMonths(date, months) {
+    const d = new Date(date.getTime());
+    d.setMonth(d.getMonth() + months);
+    return d;
+  }
+
   async function registrarTicket() {
-    const payload = {
-      numero: iNum.value.trim(),
-      fecha:  iFecha.value,
-      total:  parseFloat(iTotal.value || "0") || 0,
-      productos,
-      puntos: getPuntosDetalle()
-    };
-    if (!payload.numero || !payload.fecha || !payload.total) {
+    const user = firebase.auth().currentUser;
+    if (!user) {
+      msgTicket.className = 'validacion-msg err';
+      msgTicket.textContent = "Debes iniciar sesión para registrar.";
+      return;
+    }
+
+    const numero   = iNum.value.trim();
+    const fechaStr = iFecha.value; // YYYY-MM-DD
+    const totalNum = parseFloat(iTotal.value || "0") || 0;
+
+    if (!numero || !fechaStr || !totalNum) {
       msgTicket.className = 'validacion-msg err';
       msgTicket.textContent = "Faltan datos obligatorios: número, fecha y total.";
       return;
     }
-    console.log("Ticket listo para enviar:", payload);
-    msgTicket.className = 'validacion-msg ok';
-    msgTicket.textContent = `✅ Ticket registrado. Puntos: ${payload.puntos.total}`;
+
+    const puntos = getPuntosDetalle(productos);
+    const fecha = new Date(`${fechaStr}T00:00:00`);
+    const vencePuntos = addMonths(fecha, 6);
+
+    const docData = {
+      numero,
+      fecha: firebase.firestore.Timestamp.fromDate(fecha),
+      total: totalNum,
+      productos: productos.map(p => ({ nombre: p.name, cantidad: p.qty })),
+      puntos, // { total, detalle[] }
+      vencePuntos: firebase.firestore.Timestamp.fromDate(vencePuntos),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+      await db.collection('users').doc(user.uid).collection('tickets').add(docData);
+
+      msgTicket.className = 'validacion-msg ok';
+      msgTicket.textContent = `✅ Ticket registrado. Puntos: ${puntos.total}`;
+
+      // Redirigir al panel tras 1.2s
+      setTimeout(() => { window.location.href = 'panel.html'; }, 1200);
+    } catch (e) {
+      console.error(e);
+      msgTicket.className = 'validacion-msg err';
+      msgTicket.textContent = "Error al guardar el ticket. Inténtalo de nuevo.";
+    }
   }
 
-  // ===== Eventos =====
+  // ===================== Eventos =====================
   btnCam?.addEventListener('click', openCamera);
   btnClose?.addEventListener('click', stopCamera);
   btnShot?.addEventListener('click', captureFrame);
 
-  // Archivo seleccionado → preview + habilitar edición
   fileInput?.addEventListener('change', (e) => {
     const f = e.target.files && e.target.files[0];
     if (f) {
@@ -511,7 +529,6 @@
     setStatus("Edición manual habilitada.", "ok");
   });
 
-  // Chips productos
   listaProd.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -525,7 +542,6 @@
     renderProductos();
   });
 
-  // Agregar manual
   btnAdd?.addEventListener('click', () => {
     const n = nuevoProd.value.trim();
     const c = Math.max(1, parseInt(nuevaCant.value||"1", 10));
@@ -533,7 +549,6 @@
     nuevoProd.value = ''; nuevaCant.value = '';
   });
 
-  // Catálogo
   buscarProd?.addEventListener('input', (e) => renderCatalogo(e.target.value));
   gridProd.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-add]');
@@ -541,15 +556,13 @@
     upsertProducto(btn.dataset.add, 1);
   });
 
-  // Registrar
   btnRegistrar?.addEventListener('click', registrarTicket);
 
-  // ===== Init =====
+  // ===================== Init =====================
   enableForm(false);
   renderCatalogo('');
   updatePuntosResumen();
 
-  // Mensaje útil si no estás en HTTPS (móviles requieren HTTPS para cámara)
   if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
     setStatus("Para usar la cámara en móviles, abre el sitio con HTTPS.", "err");
   }
