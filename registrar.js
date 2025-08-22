@@ -1,12 +1,10 @@
-// registrar.js — Cámara móvil + (OpenCV opcional) + OCR + Puntos automáticos + Firestore
-
+// registrar.js — Cámara móvil robusta + (OpenCV opc.) + OCR + Puntos automáticos + Firestore
 (() => {
   const el = (id) => document.getElementById(id);
 
   // ===================== Firestore =====================
   const db = firebase.firestore();
-  // Cache offline (opcional)
-  db.enablePersistence({ synchronizeTabs: true }).catch(() => { /* ignorar errores de persistencia */ });
+  db.enablePersistence({ synchronizeTabs: true }).catch(() => { /* ignore */ });
 
   // ===================== Elementos UI =====================
   const fileInput    = el('ticketFile');
@@ -189,25 +187,41 @@
         setStatus("Tu navegador no soporta cámara. Usa Adjuntar foto.", "err");
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment",
-          width:  { ideal: 1920 },
-        height: { ideal: 1080 }
-        },
-        audio: false
-      });
+
+      // iOS: autoplay requiere muted + playsInline
+      video.muted = true;
+      video.setAttribute('playsinline', 'true');
+
+      const tries = [
+        { video: { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false },
+        { video: { facingMode: { ideal: "environment" },  width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false },
+        { video: true, audio: false }
+      ];
+
+      let stream = null; let lastErr = null;
+      for (const c of tries) {
+        try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+        catch (e) { lastErr = e; }
+      }
+      if (!stream) throw lastErr || new Error("No se pudo abrir la cámara");
+
       liveStream = stream;
       video.srcObject = stream;
-      if (modal) {
-        modal.setAttribute('aria-hidden','false');
-        modal.style.display = 'flex';
-      }
+      if (modal) { modal.setAttribute('aria-hidden','false'); modal.style.display = 'flex'; }
+
+      // Asegura inicio del video (iOS/Safari)
+      await video.play();
+
       setStatus("");
     } catch (error) {
-      console.error("Error accediendo a la cámara:", error);
-      setStatus("No se pudo acceder a la cámara. Revisa permisos (candado) o usa Adjuntar foto.", "err");
-      fileInput?.click(); // fallback
+      console.error("getUserMedia error:", error);
+      let hint = "No se pudo acceder a la cámara. Revisa permisos del navegador.";
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        hint += " (En móviles necesitas HTTPS).";
+      }
+      setStatus(hint, "err");
+      // fallback: selector de archivo
+      fileInput?.click();
     }
   }
   function stopCamera() {
@@ -215,20 +229,14 @@
       liveStream.getTracks().forEach(track => track.stop());
       liveStream = null;
     }
-    if (modal) {
-      modal.setAttribute('aria-hidden','true');
-      modal.style.display = 'none';
-    }
+    if (modal) { modal.setAttribute('aria-hidden','true'); modal.style.display = 'none'; }
   }
-
   async function captureFrame() {
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    if (!w || !h) return;
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) { setStatus("Cámara aún no lista. Intenta de nuevo.", "err"); return; }
 
     const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = w;
-    tempCanvas.height = h;
+    tempCanvas.width = w; tempCanvas.height = h;
     const ctx = tempCanvas.getContext("2d");
     ctx.drawImage(video, 0, 0, w, h);
 
@@ -236,12 +244,8 @@
 
     let finalDataURL;
     if (window.cv && window.cv.Mat) {
-      try {
-        finalDataURL = processImageWithOpenCV(tempCanvas);
-      } catch (e) {
-        console.warn("OpenCV falló, uso imagen original:", e);
-        finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92);
-      }
+      try { finalDataURL = processImageWithOpenCV(tempCanvas); }
+      catch (e) { console.warn("OpenCV falló:", e); finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92); }
     } else {
       finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92);
     }
@@ -270,9 +274,7 @@
       cv.Canny(blurred, canny, 75, 200, 3, false);
       cv.findContours(canny, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      let maxArea = 0;
-      let bestContour = null;
-
+      let maxArea = 0, bestContour = null;
       for (let i = 0; i < contours.size(); ++i) {
         const contour = contours.get(i);
         const area = cv.contourArea(contour);
@@ -290,8 +292,6 @@
           approx.delete();
         }
       }
-
-      let outCanvas = document.createElement('canvas');
 
       if (bestContour) {
         const pts = [];
@@ -321,7 +321,6 @@
         const showCanvas = document.createElement('canvas');
         cv.imshow(showCanvas, dst);
 
-        // pequeño ajuste para OCR
         const ctx = showCanvas.getContext('2d');
         ctx.filter = 'contrast(1.18) brightness(1.06) grayscale(1)';
         const tmp = document.createElement('canvas');
@@ -329,8 +328,7 @@
         tmp.getContext('2d').drawImage(showCanvas, 0, 0);
         ctx.drawImage(tmp, 0, 0);
 
-        outCanvas = showCanvas;
-        finalDataURL = outCanvas.toDataURL("image/jpeg", 0.95);
+        finalDataURL = showCanvas.toDataURL("image/jpeg", 0.95);
       } else {
         finalDataURL = canvasElement.toDataURL("image/jpeg", 0.92);
       }
@@ -367,7 +365,7 @@
     await ocrWorker.loadLanguage('spa+eng');
     await ocrWorker.initialize('spa+eng');
     await ocrWorker.setParameters({
-      tessedit_pageseg_mode: '6', // bloque uniforme
+      tessedit_pageseg_mode: '6',
       preserve_interword_spaces: '1',
       user_defined_dpi: '300'
     });
@@ -425,6 +423,7 @@
       return;
     }
     setStatus("Reconociendo texto… 0%");
+    // deshabilitamos SOLO mientras corre OCR
     enableForm(false);
     msgTicket.textContent = '';
 
@@ -444,23 +443,20 @@
       productos = [];
       productosDetectados.forEach(p => upsertProducto(p.name, p.qty));
 
-      enableForm(true);
       setStatus("✓ Ticket procesado. Verifica/ajusta los campos.", "ok");
     } catch (e) {
       console.warn("OCR error:", e);
       setStatus(String(e?.message).includes('OCR_TIMEOUT')
         ? "OCR tardó demasiado. Edición manual habilitada."
         : "No pude leer el ticket. Intenta con más luz o edita manualmente.", "err");
+    } finally {
+      // re-habilitamos SIEMPRE al terminar OCR
       enableForm(true);
     }
   }
 
-  // ===================== Guardar en Firestore (con vencimiento 6 meses) =====================
-  function addMonths(date, months) {
-    const d = new Date(date.getTime());
-    d.setMonth(d.getMonth() + months);
-    return d;
-  }
+  // ===================== Guardar en Firestore (vence 6 meses) =====================
+  function addMonths(date, months) { const d = new Date(date.getTime()); d.setMonth(d.getMonth() + months); return d; }
 
   async function registrarTicket() {
     const user = firebase.auth().currentUser;
@@ -496,11 +492,8 @@
 
     try {
       await db.collection('users').doc(user.uid).collection('tickets').add(docData);
-
       msgTicket.className = 'validacion-msg ok';
       msgTicket.textContent = `✅ Ticket registrado. Puntos: ${puntos.total}`;
-
-      // Redirigir al panel tras 1.2s
       setTimeout(() => { window.location.href = 'panel.html'; }, 1200);
     } catch (e) {
       console.error(e);
@@ -559,7 +552,8 @@
   btnRegistrar?.addEventListener('click', registrarTicket);
 
   // ===================== Init =====================
-  enableForm(false);
+  // 🔓 Habilitado por defecto para permitir registro manual desde el inicio
+  enableForm(true);
   renderCatalogo('');
   updatePuntosResumen();
 
@@ -567,3 +561,15 @@
     setStatus("Para usar la cámara en móviles, abre el sitio con HTTPS.", "err");
   }
 })();
+
+// ===================== Init =====================
+enableForm(true);           // deja el formulario habilitado para captura manual
+renderCatalogo('');
+updatePuntosResumen();
+
+// Aviso si NO es HTTPS (o no es contexto seguro) y no es localhost
+if ((!window.isSecureContext && location.hostname !== 'localhost') ||
+    (location.protocol !== 'https:' && location.hostname !== 'localhost')) {
+  setStatus("Para usar la cámara en móviles, abre el sitio con HTTPS.", "err");
+}
+
