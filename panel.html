@@ -75,6 +75,12 @@
     const db = firebase.firestore();
     db.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
 
+    // 🔎 LOG DE PROYECTO (panel)
+    console.log("Proyecto (panel):", firebase.app().options.projectId);
+
+    const $ = (id)=>document.getElementById(id);
+    const tbody = document.querySelector('#tablaTickets tbody');
+
     function fmtDate(ts) {
       if (!ts) return '';
       const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -82,78 +88,71 @@
     }
     function daysLeft(ts) {
       const d = ts.toDate ? ts.toDate() : new Date(ts);
-      const ms = d - new Date();
-      return Math.ceil(ms / (1000*60*60*24));
+      return Math.ceil((d - new Date()) / 86400000);
     }
-
-    firebase.auth().onAuthStateChanged(async (user) => {
-      if (!user) {
-        document.getElementById('userGreeting').textContent = "Inicia sesión";
-        return;
-      }
-      document.getElementById('userGreeting').textContent = `Hola, ${user.displayName||user.email}`;
-
-      // Trae tickets más recientes
-      const snap = await db.collection('users').doc(user.uid)
-        .collection('tickets')
-        .orderBy('fecha','desc')
-        .limit(100)
-        .get();
-
-      const rows = [];
-      let totalTickets = 0;
-      let visitas = 0;
-      let ptsActivos = 0;
-      let ptsVencidos = 0;
-
-      let proximos = []; // para mostrar "puntos que vencen pronto"
-
-      snap.forEach(doc => {
-        const t = doc.data();
-        totalTickets++;
-        visitas++;
-
+    function renderStats(rows) {
+      let totalTickets=0, visitas=0, ptsActivos=0, ptsVencidos=0, proximos=[];
+      tbody.innerHTML = rows.map(t=>{
+        totalTickets++; visitas++;
         const pts = (t.puntos && t.puntos.total) || 0;
-        const vence = t.vencePuntos;
-        const left = vence ? daysLeft(vence) : 0;
-
-        let estatus = '';
-        if (!vence || left < 0) {
-          ptsVencidos += pts;
-          estatus = '<span class="chip-exp err">Vencido</span>';
-        } else {
-          ptsActivos += pts;
-          estatus = '<span class="chip-exp ok">Activo</span>';
-          if (left <= 14 && pts > 0) {
-            proximos.push({ pts, left, ticket: t.numero });
-          }
-        }
-
-        rows.push(`
+        let estatus, left = t.vencePuntos ? daysLeft(t.vencePuntos) : -1;
+        if (!t.vencePuntos || left < 0) { ptsVencidos += pts; estatus = '<span class="chip-exp err">Vencido</span>'; }
+        else { ptsActivos += pts; estatus = '<span class="chip-exp ok">Activo</span>'; if (left<=14 && pts>0) proximos.push({pts,left}); }
+        return `
           <tr>
             <td>${t.numero||''}</td>
             <td>${fmtDate(t.fecha)}</td>
             <td>$${Number(t.total||0).toFixed(2)}</td>
             <td>${pts}</td>
-            <td>${fmtDate(vence)}</td>
+            <td>${fmtDate(t.vencePuntos)}</td>
             <td>${estatus}</td>
-          </tr>
-        `);
-      });
+          </tr>`;
+      }).join('');
 
-      document.getElementById('statTickets').textContent = String(totalTickets);
-      document.getElementById('statVisitas').textContent = String(visitas);
-      document.getElementById('statPuntosActivos').textContent = String(ptsActivos);
-      document.getElementById('statPuntosVencidos').textContent = String(ptsVencidos);
-      document.querySelector('#tablaTickets tbody').innerHTML = rows.join('');
+      $('statTickets').textContent = totalTickets;
+      $('statVisitas').textContent = visitas;
+      $('statPuntosActivos').textContent = ptsActivos;
+      $('statPuntosVencidos').textContent = ptsVencidos;
+      $('statPuntosProx').textContent = proximos.length
+        ? `⚠️ ${proximos.reduce((a,b)=>a+b.pts,0)} pts vencen en ~${Math.min(...proximos.map(p=>p.left))} día(s).`
+        : '';
+    }
 
-      // Mensaje de próximos a vencer
-      if (proximos.length) {
-        // suma de pts en próximos 14 días
-        const suma = proximos.reduce((a,b)=>a+b.pts,0);
-        const minLeft = Math.min(...proximos.map(p=>p.left));
-        document.getElementById('statPuntosProx').textContent =
-          `⚠️ ${suma} pts vencen en ~${minLeft} día(s).`;
+    function showError(msg) {
+      console.error(msg);
+      tbody.innerHTML = `<tr><td colspan="6" class="err">${msg}</td></tr>`;
+    }
+
+    firebase.auth().onAuthStateChanged((user) => {
+      if (!user) {
+        $('userGreeting').textContent = "Inicia sesión";
+        showError("No hay sesión activa.");
+        return;
+      }
+
+      // 🔎 LOG DE UID (panel)
+      console.log("UID (panel):", user.uid);
+
+      $('userGreeting').textContent = `Hola, ${user.displayName||user.email}`;
+
+      const ref = db.collection('users').doc(user.uid).collection('tickets');
+      try {
+        ref.orderBy('fecha','desc').onSnapshot(
+          (snap) => {
+            const rows = snap.docs.map(d=>d.data());
+            renderStats(rows);
+          },
+          (err) => {
+            console.warn("onSnapshot con orderBy(fecha) falló:", err);
+            // Fallback sin orderBy si hay problemas de tipos/índices
+            ref.onSnapshot(
+              (snap2) => renderStats(snap2.docs.map(d=>d.data())),
+              (err2) => showError("Error leyendo tickets: "+err2.message)
+            );
+          }
+        );
+      } catch (e) {
+        showError("Error iniciando lectura: "+e.message);
       }
     });
   </script>
