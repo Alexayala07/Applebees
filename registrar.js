@@ -1,102 +1,82 @@
-// registrar.js — Opción B FINAL
-// Cámara móvil robusta + OCR + Puntos automáticos + Firestore + Logs
+// registrar.js — Cámara adaptada desde tu script + OCR rápido + puntos automáticos
 (() => {
-  const $ = (id) => document.getElementById(id);
+  const el = (id) => document.getElementById(id);
 
-  // ===================== Firebase / Firestore =====================
-  const db = firebase.firestore();
-  db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-  // Log de proyecto (depuración)
-  console.log("Proyecto (registrar):", firebase.app().options.projectId);
+  // === Elementos base (coinciden con tu HTML) ===
+  const fileInput = el('ticketFile');
+  const dropzone  = el('dropzone');
+  const btnCam    = el('btnAbrirCamara');
 
-  // ===================== Referencias UI (coinciden con tu HTML) =====================
-  const fileInput    = $('ticketFile');
-  const dropzone     = $('dropzone');
-  const btnCam       = $('btnAbrirCamara');
+  const modal     = el('cameraModal');
+  const btnClose  = el('btnCerrarCamara');
+  const video     = el('cameraVideo');
+  const canvas    = el('cameraCanvas');
+  const btnShot   = el('btnCapturar');
 
-  const modal        = $('cameraModal');
-  const btnClose     = $('btnCerrarCamara');
-  const video        = $('cameraVideo');
-  const canvas       = $('cameraCanvas');
-  const btnShot      = $('btnCapturar');
+  const btnOCR      = el('btnProcesarTicket');
+  const btnEditar   = el('btnEditarManual'); // si lo usas
+  const ocrStatus   = el('ocrStatus');
 
-  const btnOCR       = $('btnProcesarTicket');
-  const btnEditar    = $('btnEditarManual');
-  const ocrStatus    = $('ocrStatus');
+  const iNum   = el('inputTicketNumero');
+  const iFecha = el('inputTicketFecha');
+  const iTotal = el('inputTicketTotal');
 
-  const iNum         = $('inputTicketNumero');
-  const iFecha       = $('inputTicketFecha');
-  const iTotal       = $('inputTicketTotal');
+  const listaProd = el('listaProductos');
+  const nuevoProd = el('nuevoProducto');
+  const nuevaCant = el('nuevaCantidad');
+  const btnAdd    = el('btnAgregarProducto');
 
-  const listaProd    = $('listaProductos');
-  const nuevoProd    = $('nuevoProducto');
-  const nuevaCant    = $('nuevaCantidad');
-  const btnAdd       = $('btnAgregarProducto');
+  const buscarProd= el('buscarProducto');
+  const gridProd  = el('productosGrid');
 
-  const buscarProd   = $('buscarProducto');
-  const gridProd     = $('productosGrid');
+  const btnRegistrar = el('btnRegistrarTicket');
+  const msgTicket    = el('ticketValidacion');
 
-  const btnRegistrar = $('btnRegistrarTicket');
-  const msgTicket    = $('ticketValidacion');
+  // ====== PUNTOS (tabla automática) ======
+  const tablaPuntosBody = (el('tablaPuntos')||{}).querySelector?.('tbody');
+  const totalPuntosEl   = el('totalPuntos');
 
-  // (Opcional) tabla de puntos si existe en el HTML
-  const tablaPuntosBody = ($('tablaPuntos')||{}).querySelector?.('tbody');
-  const totalPuntosEl   = $('totalPuntos');
-
-  // ===================== Estado =====================
-  let liveStream = null;
+  // === Estado ===
+  let liveStream = null;         // <- como en tu script
   let currentPreviewURL = null;
   let productos = []; // [{ name, qty }]
   let ocrWorker = null;
 
-  // ===================== Catálogo & Puntos =====================
+  // Catálogo visible para agregar rápido
   const CATALOGO = [
     "Hamburguesa Clásica","Hamburguesa Doble","Combo Hamburguesa",
     "Alitas","Boneless","Papas a la Francesa","Aros de Cebolla",
     "Refresco","Malteada","Limonada","Ensalada","Postre","Cerveza"
   ];
+
+  // ====== Mapa de puntos AUTOMÁTICO (ajústalo aquí) ======
   const PUNTOS_MAP = Object.freeze({
-    "Hamburguesa Clásica": 5, "Hamburguesa Doble": 7, "Combo Hamburguesa": 8,
-    "Alitas": 5, "Boneless": 5, "Papas a la Francesa": 3, "Aros de Cebolla": 3,
-    "Refresco": 3, "Malteada": 4, "Limonada": 3, "Ensalada": 4, "Postre": 4, "Cerveza": 3
+    "Hamburguesa Clásica": 5,
+    "Hamburguesa Doble": 7,
+    "Combo Hamburguesa": 8,
+    "Alitas": 5,
+    "Boneless": 5,
+    "Papas a la Francesa": 3,
+    "Aros de Cebolla": 3,
+    "Refresco": 3,
+    "Malteada": 4,
+    "Limonada": 3,
+    "Ensalada": 4,
+    "Postre": 4,
+    "Cerveza": 3
   });
   const getPuntosUnit = (name) => Number(PUNTOS_MAP[name] || 0);
 
-  // ===================== Utilidades UI =====================
+  // ===== Utilidades UI =====
   function setStatus(msg, type = '') {
     ocrStatus.className = 'validacion-msg';
     if (type) ocrStatus.classList.add(type);
     ocrStatus.textContent = msg || '';
   }
-
-  // Opción B: habilitado/inhabilitado forzado (quita/pon el atributo HTML)
   function enableForm(enabled) {
-    const ids = [
-      'inputTicketNumero','inputTicketFecha','inputTicketTotal',
-      'nuevoProducto','nuevaCantidad','btnAgregarProducto',
-      'buscarProducto','btnRegistrarTicket'
-    ];
-    ids.forEach(id => {
-      const node = $(id);
-      if (!node) return;
-      if (enabled) {
-        node.disabled = false;
-        node.removeAttribute('disabled');   // 👈 fuerza quitar el atributo
-      } else {
-        node.disabled = true;
-        node.setAttribute('disabled', '');  // 👈 lo vuelve a poner si hace falta
-      }
-    });
+    [iNum, iFecha, iTotal, nuevoProd, nuevaCant, btnAdd, buscarProd, btnRegistrar]
+      .forEach(inp => inp && (inp.disabled = !enabled));
   }
-
-  // Rescate por si algún error impide habilitar el form
-  function forceEnableForm() {
-    try { enableForm(true); } catch(_) {}
-  }
-  document.addEventListener('DOMContentLoaded', forceEnableForm);
-  setTimeout(forceEnableForm, 0);
-  setTimeout(forceEnableForm, 300);
-
   function setPreview(file) {
     if (currentPreviewURL) URL.revokeObjectURL(currentPreviewURL);
     const url = URL.createObjectURL(file);
@@ -125,7 +105,7 @@
     setPreview(file);
   }
 
-  // ===================== Productos =====================
+  // ===== Productos (chips + catálogo) =====
   function upsertProducto(nombre, cantidad = 1) {
     nombre = String(nombre||'').trim();
     if (!nombre) return;
@@ -163,24 +143,32 @@
     });
   }
 
-  // ===================== Puntos (resumen) =====================
-  function updatePuntosResumen() {
+  // ====== Resumen de puntos (automático) ======
+  function updatePuntosResumen(){
     if (!tablaPuntosBody) return;
     tablaPuntosBody.innerHTML = '';
     let total = 0;
+
     productos.forEach(p => {
       const pts = getPuntosUnit(p.name);
       const sub = pts * p.qty;
       total += sub;
+
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${p.name}</td><td>${p.qty}</td><td>${pts}</td><td>${sub}</td>`;
+      tr.innerHTML = `
+        <td>${p.name}</td>
+        <td>${p.qty}</td>
+        <td>${pts}</td>
+        <td>${sub}</td>
+      `;
       tablaPuntosBody.appendChild(tr);
     });
+
     if (totalPuntosEl) totalPuntosEl.textContent = String(total);
   }
-  function getPuntosDetalle(arr = productos) {
+  function getPuntosDetalle(){
     let total = 0;
-    const detalle = arr.map(p => {
+    const detalle = productos.map(p => {
       const pts = getPuntosUnit(p.name);
       const sub = pts * p.qty;
       total += sub;
@@ -189,76 +177,92 @@
     return { total, detalle };
   }
 
-  // ===================== Cámara (móvil/desktop) =====================
+  // ===================================================================================
+  // ============  CÁMARA — Adaptada desde tu script (startLiveCamera/takePhoto)  ======
+  // ===================================================================================
+
   async function openCamera() {
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         setStatus("Tu navegador no soporta cámara. Usa Adjuntar foto.", "err");
         return;
       }
-      // iOS / Safari: autoplay requiere muted + playsinline
-      video.muted = true;
-      video.setAttribute('playsinline','true');
-
-      const tries = [
-        { video: { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false },
-        { video: { facingMode: { ideal: "environment" },  width: { ideal: 1920 }, height: { ideal: 1080 } }, audio:false },
-        { video: true, audio:false }
-      ];
-
-      let stream = null, lastErr = null;
-      for (const c of tries) {
-        try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
-        catch (e) { lastErr = e; }
-      }
-      if (!stream) throw lastErr || new Error("No se pudo abrir la cámara");
-
+      // Igual que tu startLiveCamera, con constraints recomendados
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
       liveStream = stream;
       video.srcObject = stream;
-      if (modal) { modal.setAttribute('aria-hidden','false'); modal.style.display = 'flex'; }
-      // Asegura inicio del video (iOS)
-      await video.play();
-      setStatus('');
-    } catch (error) {
-      console.error("getUserMedia error:", error);
-      let hint = "No se pudo acceder a la cámara. Revisa permisos del navegador.";
-      if ((!window.isSecureContext && location.hostname !== 'localhost') ||
-          (location.protocol !== 'https:' && location.hostname !== 'localhost')) {
-        hint += " (En móviles necesitas HTTPS).";
+      // Mostrar modal (mantengo tu accesibilidad con aria-hidden)
+      if (modal) {
+        modal.setAttribute('aria-hidden','false');
+        modal.style.display = 'flex'; // por si usas style en vez de aria
       }
-      setStatus(hint, "err");
-      // Fallback al selector de archivo
+      setStatus("");
+    } catch (error) {
+      console.error("Error accediendo a la cámara:", error);
+      setStatus("No se pudo acceder a la cámara. Revisa permisos (candado del navegador).", "err");
+      // Fallback: abre selector de archivo
       fileInput?.click();
     }
   }
+
   function stopCamera() {
-    if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
-    if (modal) { modal.setAttribute('aria-hidden','true'); modal.style.display = 'none'; }
+    if (liveStream) {
+      liveStream.getTracks().forEach(track => track.stop());
+      liveStream = null;
+    }
+    if (modal) {
+      modal.setAttribute('aria-hidden','true');
+      modal.style.display = 'none';
+    }
   }
+
+  // === Versión adaptada de takePhoto() ===
   async function captureFrame() {
-    const w = video.videoWidth, h = video.videoHeight;
-    if (!w || !h) { setStatus("Cámara aún no lista. Intenta de nuevo.", "err"); return; }
+    // Asegura dimensiones reales del stream (como en tu takePhoto)
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return;
 
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = w; tempCanvas.height = h;
-    tempCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = w;
+    tempCanvas.height = h;
+    const ctx = tempCanvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, w, h);
 
+    // Cierra la cámara (como closeLiveCamera)
     stopCamera();
 
+    // Si OpenCV.js está disponible, intentamos enderezar el ticket (similar a processImageWithOpenCV)
     let finalDataURL;
     if (window.cv && window.cv.Mat) {
-      try { finalDataURL = processImageWithOpenCV(tempCanvas); }
-      catch (e) { console.warn("OpenCV falló, uso original:", e); finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92); }
+      try {
+        finalDataURL = processImageWithOpenCV(tempCanvas);
+      } catch (e) {
+        console.warn("OpenCV falló, uso imagen original:", e);
+        finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92);
+      }
     } else {
       finalDataURL = tempCanvas.toDataURL("image/jpeg", 0.92);
     }
 
     const blob = dataURLtoBlob(finalDataURL);
     setFileInputFromBlob(blob, `ticket_${Date.now()}.jpg`);
+
+    // Habilita formulario y da feedback
     enableForm(true);
     setStatus("Foto capturada. Puedes editar o correr OCR.", "ok");
   }
+
+  // === Adaptación de processImageWithOpenCV (sin docName; calidad 0.95) ===
   function processImageWithOpenCV(canvasElement) {
+    // NOTA: No usamos compresión primero; enderezamos y luego a JPEG
     const cv = window.cv;
     let src = cv.imread(canvasElement);
     let dst = new cv.Mat();
@@ -275,49 +279,70 @@
       cv.Canny(blurred, canny, 75, 200, 3, false);
       cv.findContours(canny, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      let maxArea = 0, bestContour = null;
+      let maxArea = 0;
+      let bestContour = null;
+
       for (let i = 0; i < contours.size(); ++i) {
         const contour = contours.get(i);
         const area = cv.contourArea(contour);
-        if (area < 15000) continue;
+        if (area < 15000) continue; // un poco más alto para tickets completos
+
         const perimeter = cv.arcLength(contour, true);
         const approx = new cv.Mat();
         cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
-        if (approx.rows === 4 && area > maxArea) { maxArea = area; if (bestContour) bestContour.delete(); bestContour = approx; }
-        else { approx.delete(); }
+
+        if (approx.rows === 4 && area > maxArea) {
+          maxArea = area;
+          if (bestContour) bestContour.delete();
+          bestContour = approx;
+        } else {
+          approx.delete();
+        }
       }
 
       let outCanvas = document.createElement('canvas');
+
       if (bestContour) {
+        // Ordena 4 puntos
         const pts = [];
-        for (let i = 0; i < bestContour.rows; ++i) pts.push({ x: bestContour.data32S[i*2], y: bestContour.data32S[i*2+1] });
-        const [tl, tr, br, bl] = orderQuad(pts);
+        for (let i = 0; i < bestContour.rows; ++i) {
+          pts.push({ x: bestContour.data32S[i*2], y: bestContour.data32S[i*2+1] });
+        }
+        const ordered = orderQuad(pts);
+        const [tl, tr, br, bl] = ordered;
 
         const widthA  = Math.hypot(br.x - bl.x, br.y - bl.y);
         const widthB  = Math.hypot(tr.x - tl.x, tr.y - tl.y);
         const maxW    = Math.max(widthA, widthB);
+
         const heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
         const heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
         const maxH    = Math.max(heightA, heightB);
 
         const dSize = new cv.Size(Math.max(300, Math.floor(maxW)), Math.max(400, Math.floor(maxH)));
+
         const srcCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [ tl.x,tl.y, tr.x,tr.y, br.x,br.y, bl.x,bl.y ]);
         const dstCoords = cv.matFromArray(4, 1, cv.CV_32FC2, [ 0,0, dSize.width-1,0, dSize.width-1,dSize.height-1, 0,dSize.height-1 ]);
 
         const M = cv.getPerspectiveTransform(srcCoords, dstCoords);
         cv.warpPerspective(src, dst, M, dSize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
         srcCoords.delete(); dstCoords.delete(); M.delete(); bestContour.delete();
 
+        // Pasamos a canvas final; mejor en escala de grises + ligero contraste para OCR
         const showCanvas = document.createElement('canvas');
         cv.imshow(showCanvas, dst);
+
         const ctx = showCanvas.getContext('2d');
         ctx.filter = 'contrast(1.18) brightness(1.06) grayscale(1)';
         const tmp = document.createElement('canvas');
         tmp.width = showCanvas.width; tmp.height = showCanvas.height;
         tmp.getContext('2d').drawImage(showCanvas, 0, 0);
         ctx.drawImage(tmp, 0, 0);
+
         outCanvas = showCanvas;
       } else {
+        // Sin detección clara, usamos la imagen original
         outCanvas = canvasElement;
       }
 
@@ -340,7 +365,10 @@
     }
   }
 
-  // ===================== OCR =====================
+  // ===================================================================================
+  // ===================================  OCR  ========================================
+  // ===================================================================================
+
   async function ensureWorker() {
     if (ocrWorker) return ocrWorker;
     const { createWorker } = Tesseract;
@@ -355,12 +383,13 @@
     await ocrWorker.loadLanguage('spa+eng');
     await ocrWorker.initialize('spa+eng');
     await ocrWorker.setParameters({
-      tessedit_pageseg_mode: '6',
+      tessedit_pageseg_mode: '6',           // bloque uniforme
       preserve_interword_spaces: '1',
       user_defined_dpi: '300'
     });
     return ocrWorker;
   }
+
   function parseOCR(text) {
     const plain = text.replace(/\s+/g, ' ').trim();
     const lower = plain.toLowerCase();
@@ -388,8 +417,11 @@
     }
 
     const claves = [
-      ["hamburguesa","Hamburguesa Clásica"], ["doble","Hamburguesa Doble"], ["combo","Combo Hamburguesa"],
-      ["alitas","Alitas"],["boneless","Boneless"],["papas","Papas a la Francesa"],["aros","Aros de Cebolla"],
+      ["hamburguesa","Hamburguesa Clásica"],
+      ["doble","Hamburguesa Doble"],
+      ["combo","Combo Hamburguesa"],
+      ["alitas","Alitas"],["boneless","Boneless"],
+      ["papas","Papas a la Francesa"],["aros","Aros de Cebolla"],
       ["refresco","Refresco"],["malteada","Malteada"],["limonada","Limonada"],
       ["ensalada","Ensalada"],["postre","Postre"],["cerveza","Cerveza"]
     ];
@@ -401,6 +433,7 @@
 
     return { numero, fecha, total, productosDetectados };
   }
+
   async function procesarTicket() {
     const file = fileInput.files && fileInput.files[0];
     if (!file) {
@@ -427,74 +460,42 @@
       productos = [];
       productosDetectados.forEach(p => upsertProducto(p.name, p.qty));
 
+      enableForm(true);
       setStatus("✓ Ticket procesado. Verifica/ajusta los campos.", "ok");
     } catch (e) {
       console.warn("OCR error:", e);
       setStatus(String(e?.message).includes('OCR_TIMEOUT')
         ? "OCR tardó demasiado. Edición manual habilitada."
         : "No pude leer el ticket. Intenta con más luz o edita manualmente.", "err");
-    } finally {
-      enableForm(true); // 👈 se re-habilita sí o sí
+      enableForm(true);
     }
   }
 
-  // ===================== Guardar en Firestore (vence a 6 meses) =====================
-  function addMonths(date, months) { const d = new Date(date.getTime()); d.setMonth(d.getMonth() + months); return d; }
-
+  // ===== Registro final =====
   async function registrarTicket() {
-    const user = firebase.auth().currentUser;
-    if (!user) {
-      msgTicket.className = 'validacion-msg err';
-      msgTicket.textContent = "Debes iniciar sesión para registrar.";
-      return;
-    }
-
-    const numero   = iNum.value.trim();
-    const fechaStr = iFecha.value; // YYYY-MM-DD
-    const totalNum = parseFloat(iTotal.value || "0") || 0;
-
-    if (!numero || !fechaStr || !totalNum) {
+    const payload = {
+      numero: iNum.value.trim(),
+      fecha:  iFecha.value,
+      total:  parseFloat(iTotal.value || "0") || 0,
+      productos,
+      puntos: getPuntosDetalle()
+    };
+    if (!payload.numero || !payload.fecha || !payload.total) {
       msgTicket.className = 'validacion-msg err';
       msgTicket.textContent = "Faltan datos obligatorios: número, fecha y total.";
       return;
     }
-
-    const puntos = getPuntosDetalle(productos);
-    const fecha = new Date(`${fechaStr}T00:00:00`);
-    const vencePuntos = addMonths(fecha, 6);
-
-    const docData = {
-      numero,
-      fecha: firebase.firestore.Timestamp.fromDate(fecha),
-      total: totalNum,
-      productos: productos.map(p => ({ nombre: p.name, cantidad: p.qty })),
-      puntos, // { total, detalle[] }
-      vencePuntos: firebase.firestore.Timestamp.fromDate(vencePuntos),
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-
-    // 🔎 Logs de depuración
-    console.log("== REGISTRAR ==");
-    console.log("UID:", user.uid, "Proyecto:", firebase.app().options.projectId);
-    console.log("Doc a guardar:", docData);
-
-    try {
-      await db.collection('users').doc(user.uid).collection('tickets').add(docData);
-      msgTicket.className = 'validacion-msg ok';
-      msgTicket.textContent = `✅ Ticket registrado. Puntos: ${puntos.total}`;
-      setTimeout(() => { window.location.href = 'panel.html'; }, 1200);
-    } catch (e) {
-      console.error(e);
-      msgTicket.className = 'validacion-msg err';
-      msgTicket.textContent = "Error al guardar el ticket. Inténtalo de nuevo.";
-    }
+    console.log("Ticket listo para enviar:", payload);
+    msgTicket.className = 'validacion-msg ok';
+    msgTicket.textContent = `✅ Ticket registrado. Puntos: ${payload.puntos.total}`;
   }
 
-  // ===================== Eventos =====================
+  // ===== Eventos =====
   btnCam?.addEventListener('click', openCamera);
   btnClose?.addEventListener('click', stopCamera);
   btnShot?.addEventListener('click', captureFrame);
 
+  // Archivo seleccionado → preview + habilitar edición
   fileInput?.addEventListener('change', (e) => {
     const f = e.target.files && e.target.files[0];
     if (f) {
@@ -510,6 +511,7 @@
     setStatus("Edición manual habilitada.", "ok");
   });
 
+  // Chips productos
   listaProd.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -523,6 +525,7 @@
     renderProductos();
   });
 
+  // Agregar manual
   btnAdd?.addEventListener('click', () => {
     const n = nuevoProd.value.trim();
     const c = Math.max(1, parseInt(nuevaCant.value||"1", 10));
@@ -530,6 +533,7 @@
     nuevoProd.value = ''; nuevaCant.value = '';
   });
 
+  // Catálogo
   buscarProd?.addEventListener('input', (e) => renderCatalogo(e.target.value));
   gridProd.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-add]');
@@ -537,16 +541,17 @@
     upsertProducto(btn.dataset.add, 1);
   });
 
+  // Registrar
   btnRegistrar?.addEventListener('click', registrarTicket);
 
-  // ===================== Init =====================
-  // Habilitado por defecto para permitir registro manual desde el inicio
-  enableForm(true);
-  renderCatalogo('');
-  updatePuntosResumen();
+ // Init
+enableForm(true);
+renderCatalogo('');
+updatePuntosResumen();
 
-  if ((!window.isSecureContext && location.hostname !== 'localhost') ||
-      (location.protocol !== 'https:' && location.hostname !== 'localhost')) {
-    setStatus("Para usar la cámara en móviles, abre el sitio con HTTPS.", "err");
-  }
+if ((!window.isSecureContext && location.hostname !== 'localhost') ||
+    (location.protocol !== 'https:' && location.hostname !== 'localhost')) {
+  setStatus("Para usar la cámara en móviles, abre el sitio con HTTPS.", "err");
+}
 })();
+
