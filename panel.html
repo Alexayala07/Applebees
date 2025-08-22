@@ -23,6 +23,9 @@
     .ok { color:#9be49b; }
     .warn { color:#ffdfaa; }
     .err { color:#ff9a9a; }
+
+    /* Ajuste pequeño para el botón Salir en el header */
+    .right-section .btn-logout { margin-left: 8px; padding: 10px 16px; }
   </style>
 </head>
 <body class="bg-animated">
@@ -31,6 +34,8 @@
     <div class="center-section"><p id="userGreeting">Panel</p></div>
     <div class="right-section">
       <a class="btn-secondary" href="registrar.html">+ Registrar ticket</a>
+      <!-- Botón rojo Salir -->
+      <button id="btnLogout" class="btn-cta btn-logout" type="button">Salir</button>
     </div>
   </header>
 
@@ -80,6 +85,17 @@
 
     const $ = (id)=>document.getElementById(id);
     const tbody = document.querySelector('#tablaTickets tbody');
+
+    // 👉 Salir: cierra sesión y redirige a index.html
+    document.getElementById('btnLogout').addEventListener('click', async () => {
+      try {
+        await firebase.auth().signOut();
+        location.href = 'index.html';
+      } catch (e) {
+        console.error('Error al cerrar sesión:', e);
+        alert('No se pudo cerrar sesión. Intenta de nuevo.');
+      }
+    });
 
     function fmtDate(ts) {
       if (!ts) return '';
