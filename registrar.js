@@ -1,4 +1,4 @@
-// registrar.js — FINAL
+// registrar.js — Opción B FINAL
 // Cámara móvil robusta + OCR + Puntos automáticos + Firestore + Logs
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -68,10 +68,35 @@
     if (type) ocrStatus.classList.add(type);
     ocrStatus.textContent = msg || '';
   }
+
+  // Opción B: habilitado/inhabilitado forzado (quita/pon el atributo HTML)
   function enableForm(enabled) {
-    [iNum, iFecha, iTotal, nuevoProd, nuevaCant, btnAdd, buscarProd, btnRegistrar]
-      .forEach(inp => inp && (inp.disabled = !enabled));
+    const ids = [
+      'inputTicketNumero','inputTicketFecha','inputTicketTotal',
+      'nuevoProducto','nuevaCantidad','btnAgregarProducto',
+      'buscarProducto','btnRegistrarTicket'
+    ];
+    ids.forEach(id => {
+      const node = $(id);
+      if (!node) return;
+      if (enabled) {
+        node.disabled = false;
+        node.removeAttribute('disabled');   // 👈 fuerza quitar el atributo
+      } else {
+        node.disabled = true;
+        node.setAttribute('disabled', '');  // 👈 lo vuelve a poner si hace falta
+      }
+    });
   }
+
+  // Rescate por si algún error impide habilitar el form
+  function forceEnableForm() {
+    try { enableForm(true); } catch(_) {}
+  }
+  document.addEventListener('DOMContentLoaded', forceEnableForm);
+  setTimeout(forceEnableForm, 0);
+  setTimeout(forceEnableForm, 300);
+
   function setPreview(file) {
     if (currentPreviewURL) URL.revokeObjectURL(currentPreviewURL);
     const url = URL.createObjectURL(file);
@@ -409,7 +434,7 @@
         ? "OCR tardó demasiado. Edición manual habilitada."
         : "No pude leer el ticket. Intenta con más luz o edita manualmente.", "err");
     } finally {
-      enableForm(true);
+      enableForm(true); // 👈 se re-habilita sí o sí
     }
   }
 
@@ -448,7 +473,7 @@
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
 
-    // 🔎 Logs de depuración (donde me pediste)
+    // 🔎 Logs de depuración
     console.log("== REGISTRAR ==");
     console.log("UID:", user.uid, "Proyecto:", firebase.app().options.projectId);
     console.log("Doc a guardar:", docData);
